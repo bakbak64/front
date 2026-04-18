@@ -1,23 +1,24 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { Sidebar, type ViewKey } from "@/components/crisis/sidebar"
 import { MobileNav } from "@/components/crisis/mobile-nav"
 import { MapView } from "@/components/crisis/map-view"
 import { FloatingControls } from "@/components/crisis/floating-controls"
 import { IncidentPanel } from "@/components/crisis/incident-panel"
-import { ReportFlow } from "@/components/crisis/report-flow"
 import { VolunteerPanel } from "@/components/crisis/volunteer-panel"
 import { Dashboard } from "@/components/crisis/dashboard"
 import { Toast, type ToastData } from "@/components/crisis/toast"
 import { SettingsView } from "@/components/crisis/settings-view"
 import { ProfilePanel } from "@/components/crisis/profile-panel"
+import { SOSDialog } from "@/components/crisis/sos-dialog"
+import { useSOS, type SOSPhase } from "@/hooks/use-sos"
 
 export default function Page() {
   const [view, setView] = useState<ViewKey>("map")
   const [selectedIncident, setSelectedIncident] = useState<string | null>(null)
-  const [reportOpen, setReportOpen] = useState(false)
+  const [sosOpen, setSosOpen] = useState(false)
   const [volunteerMode, setVolunteerMode] = useState(false)
   const [filter, setFilter] = useState<{ severities: Set<string> }>({
     severities: new Set(["critical", "medium", "low"]),
@@ -26,6 +27,47 @@ export default function Page() {
   const [toasts, setToasts] = useState<ToastData[]>([])
   const [resolvedIds, setResolvedIds] = useState<Set<string>>(new Set())
   const [profileOpen, setProfileOpen] = useState(false)
+
+  // SOS: geolocation + voice recording driven by the SOSDialog.
+  // Use a ref to dedupe rapid status updates (the hook also emits audio-level
+  // changes, which we don't want to map to toasts or dialog close events).
+  const lastSOSPhaseRef = useRef<SOSPhase>("idle")
+  const sos = useSOS({
+    onStatus: (s) => {
+      if (s.phase === lastSOSPhaseRef.current) return
+      lastSOSPhaseRef.current = s.phase
+      if (s.phase === "sent") {
+        pushToast({
+          id: `sos-sent-${Date.now()}`,
+          title: "SOS sent",
+          description: "Dispatch received your location and audio",
+          severity: "low",
+        })
+        // Close the dialog once the success state has rendered briefly.
+        setTimeout(() => setSosOpen(false), 1200)
+      } else if (s.phase === "error") {
+        pushToast({
+          id: `sos-error-${Date.now()}`,
+          title: "SOS upload failed",
+          description: s.error ?? "Please try again",
+          severity: "medium",
+        })
+        setTimeout(() => setSosOpen(false), 1600)
+      } else if (s.phase === "cancelled") {
+        setSosOpen(false)
+      }
+    },
+  })
+
+  function openSOS() {
+    setSosOpen(true)
+    void sos.trigger()
+  }
+
+  function handleSOSCancel() {
+    sos.cancel()
+    setSosOpen(false)
+  }
 
   function handleResolve(id: string) {
     setResolvedIds((prev) => {
@@ -64,7 +106,8 @@ export default function Page() {
 
   function handleSelect(key: ViewKey) {
     if (key === "report") {
-      setReportOpen(true)
+      // Sidebar "Report" opens the SOS dialog with 20s auto-record.
+      openSOS()
       return
     }
     if (key === "volunteer") {
@@ -129,7 +172,7 @@ export default function Page() {
                 resolvedIds={resolvedIds}
               />
               <FloatingControls
-                onReport={() => setReportOpen(true)}
+                onReport={openSOS}
                 volunteerMode={volunteerMode}
                 onVolunteerToggle={setVolunteerMode}
                 filter={filter}
@@ -217,8 +260,15 @@ export default function Page() {
         }}
       />
 
-      {/* Report flow */}
-      <ReportFlow open={reportOpen} onClose={() => setReportOpen(false)} />
+      {/* SOS recorder */}
+      <SOSDialog
+        open={sosOpen}
+        status={sos.status}
+        onHoldStart={sos.onHoldStart}
+        onHoldEnd={sos.onHoldEnd}
+        onCancel={handleSOSCancel}
+        onSendNow={sos.sendNow}
+      />
 
       {/* Toasts */}
       <div className="pointer-events-none fixed right-4 top-4 z-[60] flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2 md:right-6 md:top-6">

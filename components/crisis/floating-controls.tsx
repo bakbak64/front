@@ -289,7 +289,7 @@ export function FloatingControls({
         </AnimatePresence>
       </div>
 
-      {/* Emergency FAB */}
+      {/* Emergency FAB — opens the SOS recorder dialog. */}
       <motion.button
         onClick={onReport}
         initial={{ scale: 0, opacity: 0 }}
@@ -297,7 +297,7 @@ export function FloatingControls({
         transition={{ delay: 0.3, type: "spring", stiffness: 200 }}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
-        className="pointer-events-auto absolute bottom-20 left-4 z-30 flex items-center gap-2.5 rounded-full bg-gradient-to-br from-[#FF3B3B] to-[#b91c1c] px-5 py-3.5 text-sm font-semibold text-white shadow-2xl shadow-[#FF3B3B]/30 md:bottom-6 md:left-[88px]"
+        className="pointer-events-auto absolute bottom-20 left-4 z-30 flex select-none items-center gap-2.5 rounded-full bg-gradient-to-br from-[#FF3B3B] to-[#b91c1c] px-5 py-3.5 text-sm font-semibold text-white shadow-2xl shadow-[#FF3B3B]/30 md:bottom-6 md:left-[88px]"
       >
         <span className="relative flex h-2 w-2">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
