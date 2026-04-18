@@ -1,7 +1,7 @@
 "use client"
 
 import { AnimatePresence, motion } from "framer-motion"
-import { Check, Loader2, Mic, Send, X } from "lucide-react"
+import { Check, Loader2, MapPin, MapPinOff, Mic, Send, X } from "lucide-react"
 import type { SOSStatus } from "@/hooks/use-sos"
 
 const DURATION_SECONDS = 20
@@ -32,7 +32,8 @@ export function SOSDialog({
   onCancel,
   onSendNow,
 }: SOSDialogProps) {
-  const { phase, seconds, audioLevel, held, error } = status
+  const { phase, seconds, audioLevel, held, location, locationDenied, error } =
+    status
 
   const recording = phase === "recording" || phase === "locating"
   const sending = phase === "uploading"
@@ -213,8 +214,43 @@ export function SOSDialog({
               </div>
             </div>
 
+            {/* Location indicator */}
+            <div
+              className={[
+                "flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-medium tracking-wide transition-colors",
+                location
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                  : locationDenied
+                    ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                    : "border-white/10 bg-white/[0.04] text-slate-400",
+              ].join(" ")}
+              aria-live="polite"
+            >
+              {locationDenied ? (
+                <MapPinOff className="h-3.5 w-3.5" />
+              ) : (
+                <MapPin
+                  className={[
+                    "h-3.5 w-3.5",
+                    !location ? "animate-pulse" : "",
+                  ].join(" ")}
+                />
+              )}
+              <span className="font-mono tabular-nums">
+                {location
+                  ? `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}${
+                      location.accuracy
+                        ? ` · ±${Math.round(location.accuracy)}m`
+                        : ""
+                    }`
+                  : locationDenied
+                    ? "Location unavailable"
+                    : "Acquiring location…"}
+              </span>
+            </div>
+
             {/* Status text */}
-            <div className="mt-2 px-2 text-center">
+            <div className="px-2 text-center">
               <p className="text-base font-semibold text-white text-balance">
                 {headline}
               </p>

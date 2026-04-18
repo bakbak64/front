@@ -11,6 +11,12 @@ export type SOSPhase =
   | "error"
   | "cancelled"
 
+export interface SOSLocation {
+  lat: number
+  lng: number
+  accuracy?: number
+}
+
 export interface SOSStatus {
   phase: SOSPhase
   seconds: number
@@ -18,12 +24,16 @@ export interface SOSStatus {
   audioLevel: number
   /** True while the user is holding the button past the default duration. */
   held: boolean
+  /** Resolved geolocation fix, or null while pending / denied. */
+  location: SOSLocation | null
+  /** Whether geolocation has been attempted and explicitly denied / failed. */
+  locationDenied: boolean
   error?: string
 }
 
 export interface SOSResult {
   timestamp: string
-  location: { lat: number; lng: number; accuracy?: number } | null
+  location: SOSLocation | null
   audioSize: number
   response?: unknown
   error?: string
@@ -48,6 +58,8 @@ const INITIAL_STATUS: SOSStatus = {
   seconds: 0,
   audioLevel: 0,
   held: false,
+  location: null,
+  locationDenied: false,
 }
 
 /**
@@ -73,7 +85,8 @@ export function useSOS(options: UseSOSOptions = {}) {
   const heldRef = useRef<boolean>(false)
   const activeRef = useRef<boolean>(false)
   const cancelledRef = useRef<boolean>(false)
-  const locationRef = useRef<SOSResult["location"]>(null)
+  const locationRef = useRef<SOSLocation | null>(null)
+  const locationPromiseRef = useRef<Promise<SOSLocation | null> | null>(null)
 
   // Web Audio for mic level visualization.
   const audioCtxRef = useRef<AudioContext | null>(null)
@@ -206,6 +219,21 @@ export function useSOS(options: UseSOSOptions = {}) {
       return
     }
     const blob = chunks.length ? new Blob(chunks, { type: "audio/webm" }) : null
+
+    // If geolocation is still pending (user hit "Send now" fast or mic failed
+    // before the fix resolved), give it a small window so we don't upload
+    // without a location when one would have been available.
+    const locPromise = locationPromiseRef.current
+    if (locPromise && locationRef.current == null) {
+      const waited = await Promise.race<SOSLocation | null>([
+        locPromise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
+      ])
+      if (waited && locationRef.current == null) {
+        locationRef.current = waited
+      }
+    }
+
     await uploadPayload(blob)
   }, [updateStatus, uploadPayload])
 
@@ -298,14 +326,24 @@ export function useSOS(options: UseSOSOptions = {}) {
       seconds: 0,
       audioLevel: 0,
       held: heldRef.current,
+      location: null,
+      locationDenied: false,
       error: undefined,
     })
 
-    // Kick off geolocation in parallel with mic prompt. It's okay if it resolves
-    // after recording starts — it just needs to be ready before upload.
-    void captureLocation().then((loc) => {
+    // Kick off geolocation in parallel with mic prompt. Track the promise so
+    // finalize() can await it (capped) before uploading — this guarantees the
+    // payload carries a location fix even when the user hits "Send now" fast.
+    const locPromise = captureLocation().then((loc) => {
       locationRef.current = loc
+      setStatus((prev) => ({
+        ...prev,
+        location: loc,
+        locationDenied: loc == null,
+      }))
+      return loc
     })
+    locationPromiseRef.current = locPromise
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
