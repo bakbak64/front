@@ -7,18 +7,18 @@ import { MobileNav } from "@/components/crisis/mobile-nav"
 import { MapView } from "@/components/crisis/map-view"
 import { FloatingControls } from "@/components/crisis/floating-controls"
 import { IncidentPanel } from "@/components/crisis/incident-panel"
-import { ReportFlow } from "@/components/crisis/report-flow"
 import { VolunteerPanel } from "@/components/crisis/volunteer-panel"
 import { Dashboard } from "@/components/crisis/dashboard"
 import { Toast, type ToastData } from "@/components/crisis/toast"
 import { SettingsView } from "@/components/crisis/settings-view"
 import { ProfilePanel } from "@/components/crisis/profile-panel"
+import { SOSDialog } from "@/components/crisis/sos-dialog"
 import { useSOS, type SOSPhase } from "@/hooks/use-sos"
 
 export default function Page() {
   const [view, setView] = useState<ViewKey>("map")
   const [selectedIncident, setSelectedIncident] = useState<string | null>(null)
-  const [reportOpen, setReportOpen] = useState(false)
+  const [sosOpen, setSosOpen] = useState(false)
   const [volunteerMode, setVolunteerMode] = useState(false)
   const [filter, setFilter] = useState<{ severities: Set<string> }>({
     severities: new Set(["critical", "medium", "low"]),
@@ -28,28 +28,23 @@ export default function Page() {
   const [resolvedIds, setResolvedIds] = useState<Set<string>>(new Set())
   const [profileOpen, setProfileOpen] = useState(false)
 
-  // SOS: capture geolocation + 20s voice recording on alert-button trigger.
-  // Surface phase transitions through the existing toast system so no new UI
-  // components are introduced.
+  // SOS: geolocation + voice recording driven by the SOSDialog.
+  // Use a ref to dedupe rapid status updates (the hook also emits audio-level
+  // changes, which we don't want to map to toasts or dialog close events).
   const lastSOSPhaseRef = useRef<SOSPhase>("idle")
   const sos = useSOS({
     onStatus: (s) => {
       if (s.phase === lastSOSPhaseRef.current) return
       lastSOSPhaseRef.current = s.phase
-      if (s.phase === "locating") {
-        pushToast({
-          id: `sos-start-${Date.now()}`,
-          title: "SOS triggered",
-          description: "Capturing location · starting 20s voice recording",
-          severity: "critical",
-        })
-      } else if (s.phase === "sent") {
+      if (s.phase === "sent") {
         pushToast({
           id: `sos-sent-${Date.now()}`,
           title: "SOS sent",
           description: "Dispatch received your location and audio",
           severity: "low",
         })
+        // Close the dialog once the success state has rendered briefly.
+        setTimeout(() => setSosOpen(false), 1200)
       } else if (s.phase === "error") {
         pushToast({
           id: `sos-error-${Date.now()}`,
@@ -57,9 +52,22 @@ export default function Page() {
           description: s.error ?? "Please try again",
           severity: "medium",
         })
+        setTimeout(() => setSosOpen(false), 1600)
+      } else if (s.phase === "cancelled") {
+        setSosOpen(false)
       }
     },
   })
+
+  function openSOS() {
+    setSosOpen(true)
+    void sos.trigger()
+  }
+
+  function handleSOSCancel() {
+    sos.cancel()
+    setSosOpen(false)
+  }
 
   function handleResolve(id: string) {
     setResolvedIds((prev) => {
@@ -98,9 +106,8 @@ export default function Page() {
 
   function handleSelect(key: ViewKey) {
     if (key === "report") {
-      setReportOpen(true)
-      // Nav tap has no hold semantics — fire a standard 20s SOS.
-      void sos.trigger()
+      // Sidebar "Report" opens the SOS dialog with 20s auto-record.
+      openSOS()
       return
     }
     if (key === "volunteer") {
@@ -165,9 +172,7 @@ export default function Page() {
                 resolvedIds={resolvedIds}
               />
               <FloatingControls
-                onReport={() => setReportOpen(true)}
-                onEmergencyPointerDown={sos.onHoldStart}
-                onEmergencyPointerUp={sos.onHoldEnd}
+                onReport={openSOS}
                 volunteerMode={volunteerMode}
                 onVolunteerToggle={setVolunteerMode}
                 filter={filter}
@@ -255,8 +260,15 @@ export default function Page() {
         }}
       />
 
-      {/* Report flow */}
-      <ReportFlow open={reportOpen} onClose={() => setReportOpen(false)} />
+      {/* SOS recorder */}
+      <SOSDialog
+        open={sosOpen}
+        status={sos.status}
+        onHoldStart={sos.onHoldStart}
+        onHoldEnd={sos.onHoldEnd}
+        onCancel={handleSOSCancel}
+        onSendNow={sos.sendNow}
+      />
 
       {/* Toasts */}
       <div className="pointer-events-none fixed right-4 top-4 z-[60] flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2 md:right-6 md:top-6">

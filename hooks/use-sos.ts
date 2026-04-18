@@ -9,10 +9,15 @@ export type SOSPhase =
   | "uploading"
   | "sent"
   | "error"
+  | "cancelled"
 
 export interface SOSStatus {
   phase: SOSPhase
   seconds: number
+  /** Current mic input level, 0..1. Smoothed for UI rendering. */
+  audioLevel: number
+  /** True while the user is holding the button past the default duration. */
+  held: boolean
   error?: string
 }
 
@@ -38,16 +43,25 @@ interface UseSOSOptions {
 const DEFAULT_DURATION_MS = 20_000
 const DEFAULT_ENDPOINT = "/api/sos"
 
+const INITIAL_STATUS: SOSStatus = {
+  phase: "idle",
+  seconds: 0,
+  audioLevel: 0,
+  held: false,
+}
+
 /**
- * SOS hook — captures geolocation, records audio via MediaRecorder, and POSTs
- * the result to the given endpoint as FormData. Supports "tap for 20s" and
- * "press and hold to extend" interaction patterns on a single button.
+ * SOS hook — captures geolocation, records audio via MediaRecorder, exposes a
+ * live mic level for UI, and POSTs the result to the given endpoint as
+ * FormData. Supports "tap for 20s auto-send" and "press and hold to extend"
+ * interaction patterns on a single button. Also supports `cancel()` to abort
+ * the active capture without uploading.
  */
 export function useSOS(options: UseSOSOptions = {}) {
   const duration = options.durationMs ?? DEFAULT_DURATION_MS
   const endpoint = options.endpoint ?? DEFAULT_ENDPOINT
 
-  const [status, setStatus] = useState<SOSStatus>({ phase: "idle", seconds: 0 })
+  const [status, setStatus] = useState<SOSStatus>(INITIAL_STATUS)
 
   // Refs for internals so closures always see the latest values.
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -58,7 +72,15 @@ export function useSOS(options: UseSOSOptions = {}) {
   const startedAtRef = useRef<number>(0)
   const heldRef = useRef<boolean>(false)
   const activeRef = useRef<boolean>(false)
+  const cancelledRef = useRef<boolean>(false)
   const locationRef = useRef<SOSResult["location"]>(null)
+
+  // Web Audio for mic level visualization.
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const smoothLevelRef = useRef<number>(0)
+
   const optsRef = useRef(options)
   optsRef.current = options
 
@@ -79,12 +101,26 @@ export function useSOS(options: UseSOSOptions = {}) {
       clearInterval(tickTimerRef.current)
       tickTimerRef.current = null
     }
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
   }
 
   const releaseStream = () => {
     const stream = streamRef.current
     streamRef.current = null
     if (stream) stream.getTracks().forEach((t) => t.stop())
+
+    const ctx = audioCtxRef.current
+    audioCtxRef.current = null
+    analyserRef.current = null
+    smoothLevelRef.current = 0
+    if (ctx && ctx.state !== "closed") {
+      ctx.close().catch(() => {
+        /* ignore */
+      })
+    }
   }
 
   const captureLocation = useCallback((): Promise<SOSResult["location"]> => {
@@ -112,7 +148,7 @@ export function useSOS(options: UseSOSOptions = {}) {
 
   const uploadPayload = useCallback(
     async (audio: Blob | null) => {
-      updateStatus({ phase: "uploading" })
+      updateStatus({ phase: "uploading", audioLevel: 0 })
       const result: SOSResult = {
         timestamp: new Date().toISOString(),
         location: locationRef.current,
@@ -145,7 +181,8 @@ export function useSOS(options: UseSOSOptions = {}) {
       } finally {
         // Reset to idle after a short beat so any status-driven UI can settle.
         setTimeout(() => {
-          updateStatus({ phase: "idle", seconds: 0, error: undefined })
+          setStatus(INITIAL_STATUS)
+          optsRef.current.onStatus?.(INITIAL_STATUS)
         }, 1500)
       }
     },
@@ -157,10 +194,20 @@ export function useSOS(options: UseSOSOptions = {}) {
     const chunks = chunksRef.current
     chunksRef.current = []
     releaseStream()
-    const blob = chunks.length ? new Blob(chunks, { type: "audio/webm" }) : null
     activeRef.current = false
+    if (cancelledRef.current) {
+      // Discard everything — treat as cancelled.
+      cancelledRef.current = false
+      updateStatus({ phase: "cancelled", seconds: 0, audioLevel: 0, held: false })
+      setTimeout(() => {
+        setStatus(INITIAL_STATUS)
+        optsRef.current.onStatus?.(INITIAL_STATUS)
+      }, 400)
+      return
+    }
+    const blob = chunks.length ? new Blob(chunks, { type: "audio/webm" }) : null
     await uploadPayload(blob)
-  }, [uploadPayload])
+  }, [updateStatus, uploadPayload])
 
   const stop = useCallback(() => {
     // Clear any pending auto-stop so it can't double-fire after we stop here.
@@ -191,13 +238,68 @@ export function useSOS(options: UseSOSOptions = {}) {
     [stop],
   )
 
+  const startLevelMeter = (stream: MediaStream) => {
+    try {
+      type AudioCtxCtor = typeof AudioContext
+      const w = window as unknown as {
+        AudioContext?: AudioCtxCtor
+        webkitAudioContext?: AudioCtxCtor
+      }
+      const Ctor = w.AudioContext ?? w.webkitAudioContext
+      if (!Ctor) return
+      const ctx = new Ctor()
+      audioCtxRef.current = ctx
+      const src = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+      analyser.smoothingTimeConstant = 0.6
+      src.connect(analyser)
+      analyserRef.current = analyser
+      const buf = new Uint8Array(analyser.frequencyBinCount)
+
+      const tick = () => {
+        const node = analyserRef.current
+        if (!node) return
+        node.getByteTimeDomainData(buf)
+        let sum = 0
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i] - 128) / 128
+          sum += v * v
+        }
+        const rms = Math.sqrt(sum / buf.length)
+        // Boost + clamp so quiet room noise reads as ~0 and speech as ~0.6-1.
+        const boosted = Math.min(1, rms * 3.2)
+        // Smooth with exponential moving average so the UI doesn't jitter.
+        smoothLevelRef.current =
+          smoothLevelRef.current * 0.7 + boosted * 0.3
+        setStatus((prev) =>
+          prev.phase === "recording" || prev.phase === "locating"
+            ? { ...prev, audioLevel: smoothLevelRef.current }
+            : prev,
+        )
+        rafRef.current = requestAnimationFrame(tick)
+      }
+      rafRef.current = requestAnimationFrame(tick)
+    } catch (err) {
+      console.warn("[v0][sos] audio analyser unavailable:", err)
+    }
+  }
+
   const start = useCallback(async () => {
     if (activeRef.current) return
     activeRef.current = true
+    cancelledRef.current = false
     chunksRef.current = []
     locationRef.current = null
+    smoothLevelRef.current = 0
     startedAtRef.current = Date.now()
-    updateStatus({ phase: "locating", seconds: 0, error: undefined })
+    updateStatus({
+      phase: "locating",
+      seconds: 0,
+      audioLevel: 0,
+      held: heldRef.current,
+      error: undefined,
+    })
 
     // Kick off geolocation in parallel with mic prompt. It's okay if it resolves
     // after recording starts — it just needs to be ready before upload.
@@ -208,6 +310,7 @@ export function useSOS(options: UseSOSOptions = {}) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
+      startLevelMeter(stream)
 
       const mime = (() => {
         if (typeof MediaRecorder === "undefined") return undefined
@@ -227,12 +330,12 @@ export function useSOS(options: UseSOSOptions = {}) {
 
       updateStatus({ phase: "recording", seconds: 0 })
 
-      // Elapsed-seconds ticker so callers can render a timer if they want.
+      // Elapsed-seconds ticker so callers can render a timer.
       if (tickTimerRef.current) clearInterval(tickTimerRef.current)
       tickTimerRef.current = setInterval(() => {
         const secs = Math.floor((Date.now() - startedAtRef.current) / 1000)
-        updateStatus({ seconds: secs })
-      }, 250)
+        setStatus((prev) => ({ ...prev, seconds: secs }))
+      }, 200)
 
       // Auto-stop after default duration unless the user is still holding.
       scheduleAutoStop(duration)
@@ -248,6 +351,7 @@ export function useSOS(options: UseSOSOptions = {}) {
   /** Called on pointerdown / touchstart: begin hold and start recording. */
   const onHoldStart = useCallback(() => {
     heldRef.current = true
+    setStatus((prev) => ({ ...prev, held: true }))
     if (!activeRef.current) void start()
   }, [start])
 
@@ -255,6 +359,7 @@ export function useSOS(options: UseSOSOptions = {}) {
   const onHoldEnd = useCallback(() => {
     if (!heldRef.current) return
     heldRef.current = false
+    setStatus((prev) => ({ ...prev, held: false }))
     if (!activeRef.current) return
     const elapsed = Date.now() - startedAtRef.current
     if (elapsed >= duration) {
@@ -264,6 +369,37 @@ export function useSOS(options: UseSOSOptions = {}) {
     // Otherwise the scheduled auto-stop at `duration` will fire and, since
     // heldRef is now false, it will stop the recorder.
   }, [duration, stop])
+
+  /** Abort the active capture without uploading anything. */
+  const cancel = useCallback(() => {
+    if (!activeRef.current) {
+      // Nothing to do — just make sure state is clean.
+      setStatus(INITIAL_STATUS)
+      optsRef.current.onStatus?.(INITIAL_STATUS)
+      return
+    }
+    cancelledRef.current = true
+    heldRef.current = false
+    const rec = recorderRef.current
+    if (rec && rec.state !== "inactive") {
+      // onstop handler will route through finalize(), which honors cancelledRef.
+      try {
+        rec.stop()
+      } catch {
+        void finalize()
+      }
+    } else {
+      void finalize()
+    }
+  }, [finalize])
+
+  /** Send immediately, without waiting for the 20s timer. */
+  const sendNow = useCallback(() => {
+    if (!activeRef.current) return
+    heldRef.current = false
+    setStatus((prev) => ({ ...prev, held: false }))
+    stop()
+  }, [stop])
 
   // Cleanup on unmount.
   useEffect(() => {
@@ -289,7 +425,9 @@ export function useSOS(options: UseSOSOptions = {}) {
     onHoldStart,
     /** Pointer-up/cancel handler — releases the hold, stopping if past default. */
     onHoldEnd,
-    /** Manually stop the recording. */
-    stop,
+    /** Manually stop the recording and send now. */
+    sendNow,
+    /** Abort the active capture without uploading. */
+    cancel,
   }
 }

@@ -32,10 +32,6 @@ interface FloatingControlsProps {
   refreshing: boolean
   onSelectIncident: (id: string) => void
   resolvedIds?: Set<string>
-  /** Pointer-down on the emergency FAB — begins SOS recording / hold. */
-  onEmergencyPointerDown?: () => void
-  /** Pointer-up / cancel on the emergency FAB — ends SOS hold. */
-  onEmergencyPointerUp?: () => void
 }
 
 interface NotificationItem {
@@ -104,8 +100,6 @@ export function FloatingControls({
   refreshing,
   onSelectIncident,
   resolvedIds,
-  onEmergencyPointerDown,
-  onEmergencyPointerUp,
 }: FloatingControlsProps) {
   const [filterOpen, setFilterOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -295,13 +289,9 @@ export function FloatingControls({
         </AnimatePresence>
       </div>
 
-      {/* Emergency FAB — tap to trigger SOS (20s auto-stop), hold to extend. */}
+      {/* Emergency FAB — opens the SOS recorder dialog. */}
       <motion.button
         onClick={onReport}
-        onPointerDown={onEmergencyPointerDown}
-        onPointerUp={onEmergencyPointerUp}
-        onPointerCancel={onEmergencyPointerUp}
-        onPointerLeave={onEmergencyPointerUp}
         initial={{ scale: 0, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ delay: 0.3, type: "spring", stiffness: 200 }}
