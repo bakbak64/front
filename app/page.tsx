@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { Sidebar, type ViewKey } from "@/components/crisis/sidebar"
 import { MobileNav } from "@/components/crisis/mobile-nav"
@@ -13,6 +13,7 @@ import { Dashboard } from "@/components/crisis/dashboard"
 import { Toast, type ToastData } from "@/components/crisis/toast"
 import { SettingsView } from "@/components/crisis/settings-view"
 import { ProfilePanel } from "@/components/crisis/profile-panel"
+import { useSOS, type SOSPhase } from "@/hooks/use-sos"
 
 export default function Page() {
   const [view, setView] = useState<ViewKey>("map")
@@ -26,6 +27,39 @@ export default function Page() {
   const [toasts, setToasts] = useState<ToastData[]>([])
   const [resolvedIds, setResolvedIds] = useState<Set<string>>(new Set())
   const [profileOpen, setProfileOpen] = useState(false)
+
+  // SOS: capture geolocation + 20s voice recording on alert-button trigger.
+  // Surface phase transitions through the existing toast system so no new UI
+  // components are introduced.
+  const lastSOSPhaseRef = useRef<SOSPhase>("idle")
+  const sos = useSOS({
+    onStatus: (s) => {
+      if (s.phase === lastSOSPhaseRef.current) return
+      lastSOSPhaseRef.current = s.phase
+      if (s.phase === "locating") {
+        pushToast({
+          id: `sos-start-${Date.now()}`,
+          title: "SOS triggered",
+          description: "Capturing location · starting 20s voice recording",
+          severity: "critical",
+        })
+      } else if (s.phase === "sent") {
+        pushToast({
+          id: `sos-sent-${Date.now()}`,
+          title: "SOS sent",
+          description: "Dispatch received your location and audio",
+          severity: "low",
+        })
+      } else if (s.phase === "error") {
+        pushToast({
+          id: `sos-error-${Date.now()}`,
+          title: "SOS upload failed",
+          description: s.error ?? "Please try again",
+          severity: "medium",
+        })
+      }
+    },
+  })
 
   function handleResolve(id: string) {
     setResolvedIds((prev) => {
@@ -65,6 +99,8 @@ export default function Page() {
   function handleSelect(key: ViewKey) {
     if (key === "report") {
       setReportOpen(true)
+      // Nav tap has no hold semantics — fire a standard 20s SOS.
+      void sos.trigger()
       return
     }
     if (key === "volunteer") {
@@ -130,6 +166,8 @@ export default function Page() {
               />
               <FloatingControls
                 onReport={() => setReportOpen(true)}
+                onEmergencyPointerDown={sos.onHoldStart}
+                onEmergencyPointerUp={sos.onHoldEnd}
                 volunteerMode={volunteerMode}
                 onVolunteerToggle={setVolunteerMode}
                 filter={filter}

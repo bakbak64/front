@@ -32,6 +32,10 @@ interface FloatingControlsProps {
   refreshing: boolean
   onSelectIncident: (id: string) => void
   resolvedIds?: Set<string>
+  /** Pointer-down on the emergency FAB — begins SOS recording / hold. */
+  onEmergencyPointerDown?: () => void
+  /** Pointer-up / cancel on the emergency FAB — ends SOS hold. */
+  onEmergencyPointerUp?: () => void
 }
 
 interface NotificationItem {
@@ -100,6 +104,8 @@ export function FloatingControls({
   refreshing,
   onSelectIncident,
   resolvedIds,
+  onEmergencyPointerDown,
+  onEmergencyPointerUp,
 }: FloatingControlsProps) {
   const [filterOpen, setFilterOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -289,15 +295,19 @@ export function FloatingControls({
         </AnimatePresence>
       </div>
 
-      {/* Emergency FAB */}
+      {/* Emergency FAB — tap to trigger SOS (20s auto-stop), hold to extend. */}
       <motion.button
         onClick={onReport}
+        onPointerDown={onEmergencyPointerDown}
+        onPointerUp={onEmergencyPointerUp}
+        onPointerCancel={onEmergencyPointerUp}
+        onPointerLeave={onEmergencyPointerUp}
         initial={{ scale: 0, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ delay: 0.3, type: "spring", stiffness: 200 }}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
-        className="pointer-events-auto absolute bottom-20 left-4 z-30 flex items-center gap-2.5 rounded-full bg-gradient-to-br from-[#FF3B3B] to-[#b91c1c] px-5 py-3.5 text-sm font-semibold text-white shadow-2xl shadow-[#FF3B3B]/30 md:bottom-6 md:left-[88px]"
+        className="pointer-events-auto absolute bottom-20 left-4 z-30 flex select-none items-center gap-2.5 rounded-full bg-gradient-to-br from-[#FF3B3B] to-[#b91c1c] px-5 py-3.5 text-sm font-semibold text-white shadow-2xl shadow-[#FF3B3B]/30 md:bottom-6 md:left-[88px]"
       >
         <span className="relative flex h-2 w-2">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
