@@ -16,9 +16,11 @@ const items: { key: ViewKey; label: string; icon: React.ComponentType<{ classNam
 export function Sidebar({
   active,
   onSelect,
+  onProfileClick,
 }: {
   active: ViewKey
   onSelect: (key: ViewKey) => void
+  onProfileClick?: () => void
 }) {
   return (
     <aside className="fixed left-0 top-0 z-40 hidden h-screen w-[72px] flex-col items-center justify-between border-r border-white/5 bg-[#0a0e17]/80 py-5 backdrop-blur-xl md:flex">
@@ -71,8 +73,9 @@ export function Sidebar({
 
       {/* Profile avatar */}
       <button
-        className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-gradient-to-br from-slate-700 to-slate-900 text-xs font-semibold text-slate-200 transition hover:border-white/20"
-        aria-label="Profile"
+        onClick={onProfileClick}
+        className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-gradient-to-br from-slate-700 to-slate-900 text-xs font-semibold text-slate-200 transition hover:border-white/20 hover:text-white"
+        aria-label="Open profile"
       >
         AM
       </button>

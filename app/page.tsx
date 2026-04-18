@@ -11,6 +11,8 @@ import { ReportFlow } from "@/components/crisis/report-flow"
 import { VolunteerPanel } from "@/components/crisis/volunteer-panel"
 import { Dashboard } from "@/components/crisis/dashboard"
 import { Toast, type ToastData } from "@/components/crisis/toast"
+import { SettingsView } from "@/components/crisis/settings-view"
+import { ProfilePanel } from "@/components/crisis/profile-panel"
 
 export default function Page() {
   const [view, setView] = useState<ViewKey>("map")
@@ -23,6 +25,7 @@ export default function Page() {
   const [refreshing, setRefreshing] = useState(false)
   const [toasts, setToasts] = useState<ToastData[]>([])
   const [resolvedIds, setResolvedIds] = useState<Set<string>>(new Set())
+  const [profileOpen, setProfileOpen] = useState(false)
 
   function handleResolve(id: string) {
     setResolvedIds((prev) => {
@@ -65,9 +68,15 @@ export default function Page() {
       return
     }
     if (key === "volunteer") {
-      setVolunteerMode(true)
+      // Toggle volunteer mode when tapping the nav item again.
+      setVolunteerMode((prev) => !prev)
       setView("map")
+      setSelectedIncident(null)
       return
+    }
+    // Leaving the map view also exits volunteer mode so nav indicator stays truthful.
+    if (key !== "map") {
+      setVolunteerMode(false)
     }
     setView(key)
     if (key !== "map") setSelectedIncident(null)
@@ -88,10 +97,17 @@ export default function Page() {
 
   const showingIncident = !!selectedIncident && view === "map"
   const showingVolunteerPanel = volunteerMode && view === "map" && !showingIncident
+  // When volunteer mode is active, show "volunteer" as the active nav item
+  // even though the underlying view is "map".
+  const activeNav: ViewKey = volunteerMode && view === "map" ? "volunteer" : view
 
   return (
     <main className="relative flex h-screen w-screen overflow-hidden bg-background text-foreground">
-      <Sidebar active={view} onSelect={handleSelect} />
+      <Sidebar
+        active={activeNav}
+        onSelect={handleSelect}
+        onProfileClick={() => setProfileOpen(true)}
+      />
 
       {/* Main content region */}
       <div className="relative flex-1 md:pl-[72px]">
@@ -151,18 +167,13 @@ export default function Page() {
           {view === "settings" && (
             <motion.div
               key="settings"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-y-0 left-0 right-0 flex items-center justify-center p-10 md:left-[72px]"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.25 }}
+              className="absolute inset-y-0 left-0 right-0 md:left-[72px]"
             >
-              <div className="max-w-md rounded-2xl border border-white/5 bg-white/[0.02] p-8 text-center">
-                <h2 className="text-xl font-semibold text-white">Settings</h2>
-                <p className="mt-2 text-sm text-slate-400">
-                  Configure notifications, dispatch zones, and integrations from your
-                  admin console.
-                </p>
-              </div>
+              <SettingsView />
             </motion.div>
           )}
         </AnimatePresence>
@@ -177,6 +188,33 @@ export default function Page() {
       <VolunteerPanel
         open={showingVolunteerPanel}
         onClose={() => setVolunteerMode(false)}
+        onTaskAction={(action, task) => {
+          if (action === "accept") {
+            pushToast({
+              id: `accept-${task.id}-${Date.now()}`,
+              title: "Task accepted",
+              description: `${task.title} — dispatch notified`,
+              severity: "low",
+            })
+          } else if (action === "navigate") {
+            pushToast({
+              id: `nav-${task.id}-${Date.now()}`,
+              title: "Routing started",
+              description: `Turn-by-turn directions to ${task.id}`,
+              severity: "medium",
+            })
+          }
+        }}
+      />
+
+      <ProfilePanel
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        onOpenSettings={() => {
+          setVolunteerMode(false)
+          setSelectedIncident(null)
+          setView("settings")
+        }}
       />
 
       {/* Report flow */}
@@ -197,7 +235,7 @@ export default function Page() {
         </AnimatePresence>
       </div>
 
-      <MobileNav active={view} onSelect={handleSelect} />
+      <MobileNav active={activeNav} onSelect={handleSelect} />
     </main>
   )
 }

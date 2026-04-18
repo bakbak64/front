@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   X,
@@ -9,10 +10,47 @@ import {
   MapPin,
   HandHeart,
   Sparkles,
+  CheckCircle2,
+  Loader2,
 } from "lucide-react"
 import { VOLUNTEER_TASKS, SEVERITY_META } from "@/lib/crisis-data"
 
-export function VolunteerPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+type TaskStatus = "idle" | "accepted" | "navigating"
+
+export function VolunteerPanel({
+  open,
+  onClose,
+  onTaskAction,
+}: {
+  open: boolean
+  onClose: () => void
+  onTaskAction?: (
+    action: "accept" | "navigate",
+    task: { id: string; title: string },
+  ) => void
+}) {
+  const [status, setStatus] = useState<Record<string, TaskStatus>>({})
+
+  function accept(task: { id: string; title: string }) {
+    setStatus((s) => ({ ...s, [task.id]: "accepted" }))
+    onTaskAction?.("accept", task)
+  }
+
+  function navigate(task: { id: string; title: string }) {
+    setStatus((s) => ({ ...s, [task.id]: "navigating" }))
+    onTaskAction?.("navigate", task)
+    // Revert the "navigating" spinner after a short animated delay
+    setTimeout(() => {
+      setStatus((s) => {
+        if (s[task.id] !== "navigating") return s
+        const next = { ...s }
+        // If previously accepted, go back to accepted; else idle
+        next[task.id] = "accepted"
+        return next
+      })
+    }, 1400)
+  }
+
   return (
     <AnimatePresence>
       {open && (
@@ -50,7 +88,7 @@ export function VolunteerPanel({ open, onClose }: { open: boolean; onClose: () =
               <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#22C55E]" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-white">You're available</p>
+              <p className="text-sm font-medium text-white">{"You're available"}</p>
               <p className="text-xs text-slate-400">Broadcasting location · Status: Active</p>
             </div>
             <Sparkles className="h-4 w-4 text-[#22C55E]" />
@@ -62,6 +100,9 @@ export function VolunteerPanel({ open, onClose }: { open: boolean; onClose: () =
               <AnimatePresence initial={false}>
                 {VOLUNTEER_TASKS.map((task, i) => {
                   const meta = SEVERITY_META[task.urgency]
+                  const taskStatus = status[task.id] ?? "idle"
+                  const isAccepted = taskStatus === "accepted"
+                  const isNavigating = taskStatus === "navigating"
                   return (
                     <motion.li
                       key={task.id}
@@ -71,7 +112,14 @@ export function VolunteerPanel({ open, onClose }: { open: boolean; onClose: () =
                       exit={{ opacity: 0, x: -100 }}
                       transition={{ delay: i * 0.04, type: "spring", stiffness: 200, damping: 24 }}
                     >
-                      <div className="group rounded-xl border border-white/5 bg-white/[0.02] p-4 transition hover:border-white/15 hover:bg-white/[0.04]">
+                      <div
+                        className={
+                          "group rounded-xl border p-4 transition " +
+                          (isAccepted || isNavigating
+                            ? "border-[#22C55E]/30 bg-[#22C55E]/[0.04]"
+                            : "border-white/5 bg-white/[0.02] hover:border-white/15 hover:bg-white/[0.04]")
+                        }
+                      >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
@@ -88,6 +136,12 @@ export function VolunteerPanel({ open, onClose }: { open: boolean; onClose: () =
                               <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
                                 {task.skill}
                               </span>
+                              {isAccepted && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-[#22C55E]/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#22C55E]">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Accepted
+                                </span>
+                              )}
                             </div>
                             <p className="mt-2 text-sm font-semibold leading-snug text-white text-pretty">
                               {task.title}
@@ -107,13 +161,43 @@ export function VolunteerPanel({ open, onClose }: { open: boolean; onClose: () =
                         </div>
 
                         <div className="mt-4 flex items-center gap-2">
-                          <button className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#22C55E] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#16a34a]">
-                            <Check className="h-3.5 w-3.5" />
-                            Accept
+                          <button
+                            onClick={() => accept({ id: task.id, title: task.title })}
+                            disabled={isAccepted}
+                            className={
+                              "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition " +
+                              (isAccepted
+                                ? "cursor-default bg-[#22C55E]/20 text-[#22C55E]"
+                                : "bg-[#22C55E] text-white hover:bg-[#16a34a]")
+                            }
+                          >
+                            {isAccepted ? (
+                              <>
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                Accepted
+                              </>
+                            ) : (
+                              <>
+                                <Check className="h-3.5 w-3.5" />
+                                Accept
+                              </>
+                            )}
                           </button>
-                          <button className="flex items-center justify-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/5">
-                            <Navigation className="h-3.5 w-3.5" />
-                            Navigate
+                          <button
+                            onClick={() => navigate({ id: task.id, title: task.title })}
+                            className="flex items-center justify-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/5"
+                          >
+                            {isNavigating ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Routing
+                              </>
+                            ) : (
+                              <>
+                                <Navigation className="h-3.5 w-3.5" />
+                                Navigate
+                              </>
+                            )}
                           </button>
                         </div>
                       </div>
