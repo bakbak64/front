@@ -1,10 +1,22 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import dynamic from "next/dynamic"
 import { AnimatePresence, motion } from "framer-motion"
 import { Sidebar, type ViewKey } from "@/components/crisis/sidebar"
 import { MobileNav } from "@/components/crisis/mobile-nav"
-import { MapView } from "@/components/crisis/map-view"
+// Leaflet touches `window` on import, so load MapView on the client only.
+const MapView = dynamic(
+  () => import("@/components/crisis/map-view").then((m) => m.MapView),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full w-full items-center justify-center bg-background text-xs text-slate-500">
+        Loading map…
+      </div>
+    ),
+  },
+)
 import { FloatingControls } from "@/components/crisis/floating-controls"
 import { IncidentPanel } from "@/components/crisis/incident-panel"
 import { ReportFlow } from "@/components/crisis/report-flow"

@@ -6,9 +6,12 @@ export interface Incident {
   type: IncidentType
   title: string
   severity: Severity
-  // normalized 0..1 coordinates on our fake map canvas
+  // normalized 0..1 coordinates (legacy — kept for backwards compatibility)
   x: number
   y: number
+  // real world geographic coordinates used by the Leaflet map
+  lat: number
+  lng: number
   location: string
   distanceKm: number
   timeAgo: string
@@ -18,6 +21,10 @@ export interface Incident {
   image?: string
 }
 
+// Default map center (downtown San Francisco) and zoom.
+export const MAP_CENTER: [number, number] = [37.7749, -122.4194]
+export const MAP_ZOOM = 12
+
 export const INCIDENTS: Incident[] = [
   {
     id: "INC-0481",
@@ -26,6 +33,8 @@ export const INCIDENTS: Incident[] = [
     severity: "critical",
     x: 0.32,
     y: 0.38,
+    lat: 37.7795,
+    lng: -122.4125,
     location: "Market St & 7th Ave",
     distanceKm: 0.8,
     timeAgo: "2 min ago",
@@ -41,6 +50,8 @@ export const INCIDENTS: Incident[] = [
     severity: "critical",
     x: 0.62,
     y: 0.52,
+    lat: 37.7879,
+    lng: -122.4075,
     location: "Union Square Station",
     distanceKm: 1.4,
     timeAgo: "4 min ago",
@@ -56,6 +67,8 @@ export const INCIDENTS: Incident[] = [
     severity: "medium",
     x: 0.48,
     y: 0.28,
+    lat: 37.8240,
+    lng: -122.2810,
     location: "I-580 Eastbound, Mile 14",
     distanceKm: 3.2,
     timeAgo: "8 min ago",
@@ -71,6 +84,8 @@ export const INCIDENTS: Incident[] = [
     severity: "medium",
     x: 0.22,
     y: 0.68,
+    lat: 37.7580,
+    lng: -122.4190,
     location: "Riverside Commons",
     distanceKm: 2.1,
     timeAgo: "12 min ago",
@@ -86,6 +101,8 @@ export const INCIDENTS: Incident[] = [
     severity: "low",
     x: 0.78,
     y: 0.72,
+    lat: 37.7720,
+    lng: -122.4260,
     location: "Grant Ave & Oak St",
     distanceKm: 4.5,
     timeAgo: "22 min ago",
@@ -100,6 +117,8 @@ export const INCIDENTS: Incident[] = [
     severity: "medium",
     x: 0.55,
     y: 0.78,
+    lat: 37.7796,
+    lng: -122.4186,
     location: "Federal Plaza, entrance B",
     distanceKm: 2.8,
     timeAgo: "28 min ago",
@@ -115,6 +134,8 @@ export const INCIDENTS: Incident[] = [
     severity: "low",
     x: 0.4,
     y: 0.82,
+    lat: 37.7829,
+    lng: -122.4989,
     location: "Lincoln Park Trail",
     distanceKm: 5.1,
     timeAgo: "35 min ago",
@@ -130,6 +151,8 @@ export const INCIDENTS: Incident[] = [
     severity: "low",
     x: 0.7,
     y: 0.22,
+    lat: 37.8044,
+    lng: -122.3540,
     location: "Harbor Blvd off-ramp",
     distanceKm: 3.9,
     timeAgo: "41 min ago",
